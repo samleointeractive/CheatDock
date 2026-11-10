@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from . import SUPPORT_URL
 from .loader import Sheet
 
 CATEGORY_ORDER = ["Shell & OS", "Data", "Programming", "Tools"]
@@ -164,6 +165,12 @@ class SetupDialog(QDialog):
         bottom.addSpacing(10)
         bottom.addWidget(self.count_lbl)
         bottom.addStretch(1)
+        support = QLabel(f'<a href="{SUPPORT_URL}" style="text-decoration:none; color:#ff5e5b; font-weight:600">☕ Enjoying CheatDock? Support it on Ko-fi</a>')
+        support.setObjectName("note")
+        support.setOpenExternalLinks(True)
+        support.setToolTip(SUPPORT_URL)
+        bottom.addWidget(support)
+        bottom.addSpacing(14)
         bottom.addWidget(cancel)
         bottom.addWidget(self.save_btn)
         main.addLayout(bottom)

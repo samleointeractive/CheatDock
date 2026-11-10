@@ -1,6 +1,10 @@
+<p align="center"><img src="assets/icon-128.png" width="96" alt="CheatDock icon"></p>
+
 # CheatDock
 
 A cheat sheet that lives on the edge of your screen.
+
+[Download for Windows](https://github.com/leonardodgomes/cheatdock/releases/latest/download/CheatDock-windows.zip) · [Website](https://samleointeractive.com/cheatdock/) · [☕ Support on Ko-fi](https://ko-fi.com/samleointeractive)
 
 CheatDock stays out of the way as a small `>_` icon on the edge of your monitor. Rest the mouse on it, click it, or press **Ctrl+Alt+Space** from any app, and it slides open with the cheat sheets **you** picked. Click a command to copy it, then go back to work.
 
@@ -116,6 +120,14 @@ Pushing a tag such as `v1.0.0` makes GitHub Actions build the zip and publish it
 ## Contributing
 
 Pull requests that add useful commands or new cheat sheets are welcome. Keep each item short: one task, one snippet.
+
+## Support
+
+CheatDock is free and always will be. If it saves you time, you can buy me a coffee:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/samleointeractive)
+
+You'll also find the ☕ button in the panel and in the tray menu. More projects at [samleointeractive.com](https://samleointeractive.com).
 
 ## License
 

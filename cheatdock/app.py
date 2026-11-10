@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QSystemTrayIcon, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import __version__
+from . import SUPPORT_URL, __version__
 from .hotkey import GlobalHotkey
 from .loader import Config, Item, Sheet, base_dir, load_config, load_sheets
 from .setup import SetupDialog
@@ -86,6 +86,9 @@ QToolButton {{
 QToolButton:hover {{ background: {t['btn_hover']}; color: {t['strong']}; }}
 QToolButton:checked {{ background: {t['accent']}; color: {t['on_accent']}; }}
 #themeBtn {{ font-family: "Segoe UI Symbol", "Segoe UI"; font-size: 12pt; padding: 0px 7px; }}
+#reloadBtn {{ font-family: "Segoe UI Symbol", "Segoe UI"; font-size: 12pt; padding: 0px 7px; }}
+#supportBtn {{ font-family: "Segoe UI Emoji", "Segoe UI Symbol"; font-size: 11pt; padding: 0px 6px; }}
+#supportBtn:hover {{ background: #ff5e5b; color: #ffffff; }}
 #hideBtn {{ font-size: 12pt; font-weight: 700; padding: 0px 8px; }}
 #closeBtn:hover {{ background: #e5534b; color: #ffffff; }}
 QTabWidget::pane {{ border: none; }}
@@ -168,7 +171,22 @@ def mono_font() -> QFont:
     return font
 
 
+def assets_dir() -> Path:
+    """Bundled read-only files: inside the .exe when frozen, else the repo's assets/."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "assets"
+    return Path(__file__).resolve().parent.parent / "assets"
+
+
 def app_icon() -> QIcon:
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        file = assets_dir() / f"icon-{size}.png"
+        if file.exists():
+            icon.addFile(str(file))
+    if not icon.isNull():
+        return icon
+    # Fallback if the asset files are missing.
     pix = QPixmap(64, 64)
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)
@@ -183,6 +201,10 @@ def app_icon() -> QIcon:
     p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, ">_")
     p.end()
     return QIcon(pix)
+
+
+def open_support_page() -> None:
+    QDesktopServices.openUrl(QUrl(SUPPORT_URL))
 
 
 def repolish(widget: QWidget) -> None:
@@ -522,9 +544,14 @@ class Dock(QWidget):
         self.pin_btn = QToolButton(text="Pin", checkable=True)
         self.pin_btn.setToolTip("Keep the panel open (Ctrl+P)")
         self.pin_btn.toggled.connect(self.set_pinned)
-        reload_btn = QToolButton(text="Reload")
+        reload_btn = QToolButton(text="↻")
+        reload_btn.setObjectName("reloadBtn")
         reload_btn.setToolTip("Reload cheat sheets (F5)")
         reload_btn.clicked.connect(self.reload)
+        support_btn = QToolButton(text="☕")
+        support_btn.setObjectName("supportBtn")
+        support_btn.setToolTip("Enjoying CheatDock? Support it on Ko-fi")
+        support_btn.clicked.connect(open_support_page)
         hide_btn = QToolButton(text="–")
         hide_btn.setObjectName("hideBtn")
         hide_btn.setToolTip("Hide to the edge icon (Esc)")
@@ -534,7 +561,7 @@ class Dock(QWidget):
         close_btn.setToolTip("Close CheatDock (Ctrl+Q)")
         close_btn.clicked.connect(QApplication.quit)
         QShortcut(QKeySequence("Ctrl+Q"), self, activated=QApplication.quit)
-        for b in (gear_btn, self.theme_btn, self.pin_btn, reload_btn, hide_btn, close_btn):
+        for b in (support_btn, gear_btn, self.theme_btn, self.pin_btn, reload_btn, hide_btn, close_btn):
             top.addWidget(b)
         lay.addWidget(title_bar)
 
@@ -986,6 +1013,8 @@ def build_tray(app: QApplication, dock: Dock) -> QSystemTrayIcon:
     add("Edit config.yaml",
         lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(base_dir() / "config.yaml"))))
     menu.addSeparator()
+    add("☕ Support CheatDock on Ko-fi", open_support_page)
+    menu.addSeparator()
     add("Quit", app.quit)
     tray.setContextMenu(menu)
     tray.activated.connect(
@@ -996,6 +1025,13 @@ def build_tray(app: QApplication, dock: Dock) -> QSystemTrayIcon:
 
 
 def main() -> int:
+    if sys.platform == "win32":
+        # Own taskbar identity, so Windows shows CheatDock's icon instead of Python's.
+        import ctypes
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SamleoInteractive.CheatDock")
+        except (AttributeError, OSError):
+            pass
     app = QApplication(sys.argv)
     app.setApplicationName("CheatDock")
     app.setQuitOnLastWindowClosed(False)

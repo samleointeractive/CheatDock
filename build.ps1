@@ -10,6 +10,7 @@ if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
 Remove-Item .\build, .\dist -Recurse -Force -ErrorAction SilentlyContinue
 & $py -m PyInstaller --noconfirm --onefile --windowed --name CheatDock `
+    --icon assets\icon.ico --add-data "assets\icon-*.png;assets" `
     --distpath .\dist\CheatDock run_cheatdock.pyw
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
