@@ -4,7 +4,7 @@
 
 A cheat sheet that lives on the edge of your screen.
 
-[Download for Windows](https://github.com/leonardodgomes/cheatdock/releases/latest/download/CheatDock-windows.zip) · [Website](https://samleointeractive.com/cheatdock/) · [☕ Support on Ko-fi](https://ko-fi.com/samleointeractive)
+[Download for Windows](https://github.com/samleointeractive/CheatDock/releases/latest/download/CheatDock-windows.zip) · [Website](https://samleointeractive.com/cheatdock/) · [☕ Support on Ko-fi](https://ko-fi.com/samleointeractive)
 
 CheatDock stays out of the way as a small `>_` icon on the edge of your monitor. Rest the mouse on it, click it, or press **Ctrl+Alt+Space** from any app, and it slides open with the cheat sheets **you** picked. Click a command to copy it, then go back to work.
 
@@ -31,7 +31,7 @@ Grab `CheatDock-windows.zip` from the [Releases](../../releases) page, unzip it 
 Requires Python 3.10+.
 
 ```powershell
-git clone https://github.com/leonardodgomes/cheatdock.git
+git clone https://github.com/samleointeractive/CheatDock.git
 cd cheatdock
 python -m venv .venv
 .venv\Scripts\activate
