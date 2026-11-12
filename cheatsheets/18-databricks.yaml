@@ -1,0 +1,305 @@
+name: Databricks
+order: 18
+category: Data
+description: Notebooks, dbutils, PySpark, Delta Lake, Unity Catalog and the CLI.
+sections:
+  - name: Notebook magic commands
+    items:
+      - title: Switch language in a cell
+        code: |-
+          %sql
+          %python
+          %scala
+          %r
+          %md
+        note: Put it on the first line of the cell
+      - title: Run another notebook (shares variables)
+        code: |-
+          %run ./utils/setup
+        note: Relative path; must be alone in its cell
+      - title: Install a package for this notebook
+        code: |-
+          %pip install openpyxl
+          dbutils.library.restartPython()
+      - title: Shell and file system
+        code: |-
+          %sh ls -la /tmp
+          %fs ls /Volumes/main/default/raw
+      - title: Show a DataFrame as a table / chart
+        code: |-
+          display(df)
+          display(spark.sql("SELECT * FROM main.sales.orders LIMIT 100"))
+      - title: SQL result as a Python DataFrame
+        code: |-
+          df = _sqldf
+        note: The last %sql cell's result is available as _sqldf
+
+  - name: dbutils
+    items:
+      - title: List, copy, move, remove files
+        code: |-
+          dbutils.fs.ls("/Volumes/main/default/raw")
+          dbutils.fs.cp("/Volumes/main/default/raw/a.csv", "/Volumes/main/default/archive/a.csv")
+          dbutils.fs.mv("/Volumes/main/default/raw/a.csv", "/Volumes/main/default/done/a.csv")
+          dbutils.fs.rm("/Volumes/main/default/tmp", recurse=True)
+      - title: Create folder / preview a file
+        code: |-
+          dbutils.fs.mkdirs("/Volumes/main/default/raw/2026")
+          dbutils.fs.head("/Volumes/main/default/raw/a.csv", 500)
+      - title: Widgets (notebook parameters)
+        code: |-
+          dbutils.widgets.text("start_date", "2026-01-01", "Start date")
+          dbutils.widgets.dropdown("env", "dev", ["dev", "prod"])
+          start = dbutils.widgets.get("start_date")
+          dbutils.widgets.removeAll()
+      - title: Use a widget in SQL
+        code: |-
+          SELECT * FROM main.sales.orders WHERE order_date >= :start_date;
+      - title: Secrets
+        code: |-
+          dbutils.secrets.listScopes()
+          dbutils.secrets.list("my-scope")
+          token = dbutils.secrets.get(scope="my-scope", key="api-token")
+        note: Values are shown as [REDACTED] in notebook output
+      - title: Run a notebook with parameters / return a value
+        code: |-
+          result = dbutils.notebook.run("./child", 600, {"env": "prod"})
+          dbutils.notebook.exit("ok")
+        note: 600 = timeout in seconds; exit() returns the string to the caller
+      - title: Pass values between job tasks
+        code: |-
+          dbutils.jobs.taskValues.set(key="row_count", value=1234)
+          n = dbutils.jobs.taskValues.get(taskKey="ingest", key="row_count", default=0)
+      - title: Help
+        code: |-
+          dbutils.help()
+          dbutils.fs.help()
+
+  - name: Read & write (PySpark)
+    items:
+      - title: Read a table
+        code: |-
+          df = spark.table("main.sales.orders")
+          df = spark.sql("SELECT * FROM main.sales.orders WHERE year = 2026")
+      - title: Read CSV with header
+        code: |-
+          df = (spark.read.format("csv")
+                .option("header", True)
+                .option("inferSchema", True)
+                .option("sep", ";")
+                .load("/Volumes/main/default/raw/sales.csv"))
+      - title: Read JSON / Parquet
+        code: |-
+          df = spark.read.json("/Volumes/main/default/raw/events/")
+          df = spark.read.parquet("/Volumes/main/default/raw/data.parquet")
+      - title: Save as a table
+        code: |-
+          df.write.mode("overwrite").saveAsTable("main.sales.orders_clean")
+          df.write.mode("append").saveAsTable("main.sales.orders_clean")
+        note: Delta is the default format
+      - title: Overwrite with a new schema / partitioned
+        code: |-
+          (df.write.mode("overwrite")
+             .option("overwriteSchema", True)
+             .partitionBy("year")
+             .saveAsTable("main.sales.orders_clean"))
+      - title: Write files
+        code: |-
+          df.write.mode("overwrite").option("header", True).csv("/Volumes/main/default/out/orders")
+          df.coalesce(1).write.mode("overwrite").parquet("/Volumes/main/default/out/orders_pq")
+      - title: Spark <-> pandas
+        code: |-
+          pdf = df.toPandas()
+          df = spark.createDataFrame(pdf)
+        note: toPandas() pulls everything to the driver; filter or limit first
+
+  - name: Transform (PySpark)
+    items:
+      - title: Import functions
+        code: |-
+          from pyspark.sql import functions as F
+          from pyspark.sql.window import Window
+      - title: Select, rename, filter
+        code: |-
+          df.select("id", "name", F.col("total").alias("amount"))
+          df.withColumnRenamed("old", "new")
+          df.filter((F.col("total") > 100) & (F.col("status") == "paid"))
+      - title: New / changed column
+        code: |-
+          df = df.withColumn("total_brl", F.col("total") * 5.4)
+          df = df.withColumn("tier", F.when(F.col("total") > 1000, "high").otherwise("low"))
+      - title: Group and aggregate
+        code: |-
+          df.groupBy("country").agg(
+              F.sum("total").alias("revenue"),
+              F.countDistinct("customer_id").alias("customers"),
+          )
+      - title: Join
+        code: |-
+          orders.join(customers, on="customer_id", how="left")
+          orders.join(F.broadcast(countries), "country_code")
+        note: broadcast() a small table to avoid a shuffle
+      - title: Window (row number per group)
+        code: |-
+          w = Window.partitionBy("customer_id").orderBy(F.col("order_date").desc())
+          latest = df.withColumn("rn", F.row_number().over(w)).filter("rn = 1")
+      - title: Nulls and duplicates
+        code: |-
+          df.fillna({"total": 0, "country": "N/A"})
+          df.dropna(subset=["email"])
+          df.dropDuplicates(["email"])
+      - title: Dates
+        code: |-
+          df.withColumn("d", F.to_date("order_ts"))
+          df.withColumn("month", F.date_trunc("month", "order_ts"))
+          df.withColumn("days", F.datediff(F.current_date(), "order_date"))
+      - title: Explode arrays / parse JSON
+        code: |-
+          df.withColumn("item", F.explode("items"))
+          df.withColumn("data", F.from_json("payload", "id INT, name STRING"))
+      - title: Inspect
+        code: |-
+          df.printSchema()
+          df.count()
+          df.limit(10).show(truncate=False)
+          df.explain()
+
+  - name: Delta Lake (SQL)
+    items:
+      - title: Create table
+        code: |-
+          CREATE TABLE IF NOT EXISTS main.sales.orders (
+            id BIGINT,
+            customer_id BIGINT,
+            total DECIMAL(12, 2),
+            order_date DATE
+          );
+      - title: Create table from a query
+        code: |-
+          CREATE OR REPLACE TABLE main.sales.paid AS
+          SELECT * FROM main.sales.orders WHERE status = 'paid';
+      - title: Upsert with MERGE
+        code: |-
+          MERGE INTO main.sales.orders AS t
+          USING updates AS s
+          ON t.id = s.id
+          WHEN MATCHED THEN UPDATE SET *
+          WHEN NOT MATCHED THEN INSERT *;
+      - title: History and time travel
+        code: |-
+          DESCRIBE HISTORY main.sales.orders;
+          SELECT * FROM main.sales.orders VERSION AS OF 12;
+          SELECT * FROM main.sales.orders TIMESTAMP AS OF '2026-11-01';
+      - title: Undo a bad write
+        code: |-
+          RESTORE TABLE main.sales.orders TO VERSION AS OF 12;
+      - title: Optimize / clean up files
+        code: |-
+          OPTIMIZE main.sales.orders ZORDER BY (customer_id);
+          VACUUM main.sales.orders RETAIN 168 HOURS;
+        note: VACUUM removes old files, so time travel before that point stops working
+      - title: Table details
+        code: |-
+          DESCRIBE DETAIL main.sales.orders;
+          DESCRIBE TABLE EXTENDED main.sales.orders;
+          SHOW CREATE TABLE main.sales.orders;
+      - title: Change columns
+        code: |-
+          ALTER TABLE main.sales.orders ADD COLUMNS (channel STRING);
+          ALTER TABLE main.sales.orders ALTER COLUMN total COMMENT 'Gross value in BRL';
+      - title: Read a CSV file with SQL
+        code: |-
+          SELECT * FROM read_files('/Volumes/main/default/raw/sales.csv', format => 'csv', header => true);
+      - title: Load files incrementally
+        code: |-
+          COPY INTO main.sales.orders
+          FROM '/Volumes/main/default/raw/orders/'
+          FILEFORMAT = CSV
+          FORMAT_OPTIONS ('header' = 'true')
+          COPY_OPTIONS ('mergeSchema' = 'true');
+        note: Files already loaded are skipped on the next run
+
+  - name: Unity Catalog
+    items:
+      - title: Browse catalogs, schemas, tables
+        code: |-
+          SHOW CATALOGS;
+          SHOW SCHEMAS IN main;
+          SHOW TABLES IN main.sales;
+      - title: Set the default catalog / schema
+        code: |-
+          USE CATALOG main;
+          USE SCHEMA sales;
+        note: Names are catalog.schema.table
+      - title: Create schema and volume
+        code: |-
+          CREATE SCHEMA IF NOT EXISTS main.sales;
+          CREATE VOLUME IF NOT EXISTS main.default.raw;
+        note: Files in a volume live at /Volumes/<catalog>/<schema>/<volume>/
+      - title: Grant / revoke access
+        code: |-
+          GRANT SELECT ON TABLE main.sales.orders TO `analysts`;
+          GRANT USE CATALOG ON CATALOG main TO `analysts`;
+          REVOKE SELECT ON TABLE main.sales.orders FROM `analysts`;
+          SHOW GRANTS ON TABLE main.sales.orders;
+      - title: Who am I / where am I
+        code: |-
+          SELECT current_user(), current_catalog(), current_schema();
+
+  - name: Streaming & Auto Loader
+    items:
+      - title: Auto Loader into a table
+        code: |-
+          (spark.readStream.format("cloudFiles")
+             .option("cloudFiles.format", "json")
+             .option("cloudFiles.schemaLocation", "/Volumes/main/default/chk/events_schema")
+             .load("/Volumes/main/default/raw/events/")
+             .writeStream
+             .option("checkpointLocation", "/Volumes/main/default/chk/events")
+             .trigger(availableNow=True)
+             .toTable("main.bronze.events"))
+        note: availableNow processes new files and stops, good for scheduled jobs
+      - title: Read a table as a stream
+        code: |-
+          spark.readStream.table("main.bronze.events")
+
+  - name: Performance
+    items:
+      - title: Cache a DataFrame you reuse
+        code: |-
+          df.cache()
+          df.count()
+          df.unpersist()
+        note: count() makes the cache fill now
+      - title: Partitions
+        code: |-
+          df.rdd.getNumPartitions()
+          df.repartition(200, "customer_id")
+          df.coalesce(1)
+      - title: Spark settings
+        code: |-
+          spark.conf.set("spark.sql.shuffle.partitions", "auto")
+          spark.conf.get("spark.sql.shuffle.partitions")
+
+  - name: Databricks CLI
+    items:
+      - title: Install and log in
+        code: |-
+          winget install Databricks.DatabricksCLI
+          databricks auth login --host https://<workspace>.cloud.databricks.com
+      - title: Workspace and files
+        code: |-
+          databricks workspace list /Users
+          databricks fs ls dbfs:/Volumes/main/default/raw
+          databricks fs cp .\data.csv dbfs:/Volumes/main/default/raw/
+      - title: Clusters and jobs
+        code: |-
+          databricks clusters list
+          databricks jobs list
+          databricks jobs run-now 123456
+      - title: Asset bundles
+        code: |-
+          databricks bundle init
+          databricks bundle validate
+          databricks bundle deploy -t dev
+          databricks bundle run my_job -t dev

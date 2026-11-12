@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -226,13 +227,23 @@ def repolish(widget: QWidget) -> None:
     widget.style().polish(widget)
 
 
+_BREAK_AFTER = re.compile(r"([./\\(\[{,=:;|&])(?=\S)")
+
+
+def breakable(code: str) -> str:
+    """Code for display only: zero-width spaces after punctuation let long
+    commands wrap instead of pushing the card wider than the panel."""
+    return _BREAK_AFTER.sub("\\1\u200b", code)
+
+
 class CodeLine(QLabel):
     """One command inside a multi-command card. Click to copy only this one."""
 
     clicked = Signal(object)
 
     def __init__(self, text: str, font: QFont):
-        super().__init__(text)
+        super().__init__(breakable(text))
+        self.command = text  # what gets copied (the label text has wrap hints)
         self.setObjectName("codeLine")
         self.setFont(font)
         self.setTextFormat(Qt.TextFormat.PlainText)
@@ -323,7 +334,7 @@ class Card(QFrame):
                 box.addWidget(line)
             lay.addLayout(box)
         else:
-            code = QLabel(item.code)
+            code = QLabel(breakable(item.code))
             code.setObjectName("code")
             code.setFont(font)
             code.setTextFormat(Qt.TextFormat.PlainText)
@@ -818,10 +829,10 @@ class Dock(QWidget):
                     break
 
     def copy_line(self, card: Card, line: "CodeLine") -> None:
-        QGuiApplication.clipboard().setText(line.text())
+        QGuiApplication.clipboard().setText(line.command)
         line.flash()
         self._count_use(card)
-        first = line.text().split("\n", 1)[0]
+        first = line.command.split("\n", 1)[0]
         self._set_status(f"Copied: {first if len(first) <= 60 else first[:57] + '…'}")
         QTimer.singleShot(2500, self._idle_status)
 

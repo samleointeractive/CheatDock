@@ -10,7 +10,7 @@ CheatDock stays out of the way as a small `>_` icon on the edge of your monitor.
 
 ## Features
 
-- **Pick your cheat sheets**: on first launch a setup screen lets you choose from a library of **17 cheat sheets (480 commands)** and set the tab order. Change it any time with the ⚙ button
+- **Pick your cheat sheets**: on first launch a setup screen lets you choose from a library of **18 cheat sheets (535 commands)** and set the tab order. Change it any time with the ⚙ button
 - **★ Favorites**: star the commands you use most and they appear together in the first tab. Commands you copy often also show up there under **Most used**
 - **A small icon docked to the screen edge**, always on top, never in your taskbar
 - **Works with multiple monitors**: drag the icon, or the panel's title bar, to any side of any screen. It snaps to the nearest edge and remembers where you left it
@@ -49,7 +49,7 @@ Press `Win+R`, type `shell:startup` and put a shortcut to `CheatDock.exe` (or `r
 | Category | Cheat sheets |
 |---|---|
 | Shell & OS | PowerShell, Bash / Linux, CMD, Windows shortcuts |
-| Data | SQL, Pandas, NumPy, Excel, Power BI DAX, R |
+| Data | SQL, Pandas, NumPy, Databricks, Excel, Power BI DAX, R |
 | Programming | Python, JavaScript, Regex |
 | Tools | Git, Docker, VS Code, Jupyter & envs |
 
@@ -70,11 +70,11 @@ Press `Win+R`, type `shell:startup` and put a shortcut to `CheatDock.exe` (or `r
 
 ## Adding your own commands
 
-Every file in [`cheatsheets/`](cheatsheets) appears in the setup library, and the app reloads as soon as you save one. To add a new one, for example Kubernetes, create `cheatsheets/18-kubernetes.yaml`, then tick it with the ⚙ button:
+Every file in [`cheatsheets/`](cheatsheets) appears in the setup library, and the app reloads as soon as you save one. To add a new one, for example Kubernetes, create `cheatsheets/19-kubernetes.yaml`, then tick it with the ⚙ button:
 
 ```yaml
 name: Kubernetes          # tab title
-order: 18                 # position in the library
+order: 19                 # position in the library
 category: Tools           # group in the setup screen
 description: Pods, deployments and logs with kubectl.
 sections:

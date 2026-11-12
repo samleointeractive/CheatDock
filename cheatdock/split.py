@@ -26,7 +26,11 @@ _CONT_START = re.compile(
     r"|(catch|finally|else|elif|except|done|fi|esac|then|do|VAR|RETURN)\b)"
 )
 _KEYS = re.compile(r"^(Ctrl|Shift|Alt|Win|F\d)\b")  # keyboard shortcuts, not code
-_SQL = re.compile(r"^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|BEGIN)\b", re.MULTILINE)
+_SQL = re.compile(
+    r"^\s*(SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|COPY|CREATE|ALTER|DROP|TRUNCATE|BEGIN"
+    r"|DESCRIBE|SHOW|USE|GRANT|REVOKE|OPTIMIZE|VACUUM|RESTORE)\b",
+    re.MULTILINE,
+)
 
 
 def _depth(line: str) -> int:
