@@ -23,6 +23,7 @@ from . import SUPPORT_URL, __version__
 from .hotkey import GlobalHotkey
 from .loader import Config, Item, Sheet, base_dir, load_config, load_sheets
 from .setup import SetupDialog
+from .split import split_commands
 
 ACCENT = "#4f9dff"  # tray / taskbar icon colour
 
@@ -34,7 +35,7 @@ THEMES = {
         "btn": "#aeb3bd", "btn_hover": "#2a2d35", "accent": "#4f9dff", "on_accent": "#0d1117",
         "scroll": "#3a3e48", "scroll_hover": "#4a4f5b",
         "card": "#23262d", "card_hover": "#2a2e37", "card_hover_border": "#3c4250",
-        "copied": "#1f3a2a", "copied_border": "#3fb96f",
+        "copied": "#1f3a2a", "copied_border": "#3fb96f", "line_hover": "#343a47",
         "code": "#e8c07d", "error": "#ff7b72",
     },
     "light": {
@@ -43,7 +44,7 @@ THEMES = {
         "btn": "#57606a", "btn_hover": "#e6e9ee", "accent": "#0969da", "on_accent": "#ffffff",
         "scroll": "#c4c9d2", "scroll_hover": "#aab0bb",
         "card": "#ffffff", "card_hover": "#f0f4fa", "card_hover_border": "#bfcde0",
-        "copied": "#e3f6ea", "copied_border": "#2da44e",
+        "copied": "#e3f6ea", "copied_border": "#2da44e", "line_hover": "#e4ecf7",
         "code": "#9a4d00", "error": "#cf222e",
     },
 }
@@ -121,6 +122,19 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 #status {{ color: {t['muted']}; font-size: 8.5pt; padding: 4px 2px; }}
 #status[error="true"] {{ color: {t['error']}; }}
 #empty {{ color: {t['muted']}; padding: 30px; }}
+#codeLine {{
+    color: {t['code']}; background: transparent; border: 1px solid transparent; border-radius: 4px;
+    padding: 1px 4px 1px 3px;
+    font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
+    font-size: 9.5pt;
+}}
+#codeLine:hover {{ background: {t['line_hover']}; border-color: {t['card_hover_border']}; }}
+#codeLine[copied="true"] {{ background: {t['copied']}; border-color: {t['copied_border']}; }}
+#copyAll {{
+    background: transparent; border: 1px solid {t['border']}; border-radius: 4px;
+    padding: 0px 6px; font-size: 8pt; color: {t['muted']};
+}}
+#copyAll:hover {{ color: {t['strong']}; border-color: {t['accent']}; background: transparent; }}
 #star {{ background: transparent; border: none; padding: 0px 2px; font-size: 13pt; color: {t['muted']}; }}
 #star:hover {{ background: transparent; color: #e3a008; }}
 #star:checked {{ background: transparent; color: #e3a008; }}
@@ -212,10 +226,49 @@ def repolish(widget: QWidget) -> None:
     widget.style().polish(widget)
 
 
-class Card(QFrame):
-    """One command. Click to copy its code, click the star to add it to Favorites."""
+class CodeLine(QLabel):
+    """One command inside a multi-command card. Click to copy only this one."""
 
     clicked = Signal(object)
+
+    def __init__(self, text: str, font: QFont):
+        super().__init__(text)
+        self.setObjectName("codeLine")
+        self.setFont(font)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setWordWrap(True)
+        self.setIndent(0)  # QLabel adds an automatic indent when it has a border
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setToolTip("Click to copy this line")
+
+    def mousePressEvent(self, event):
+        event.accept()  # keep the click away from the card (which copies everything)
+
+    def mouseReleaseEvent(self, event):
+        event.accept()
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit(self)
+
+    def flash(self) -> None:
+        self.setProperty("copied", True)
+        repolish(self)
+        QTimer.singleShot(700, self._unflash)
+
+    def _unflash(self) -> None:
+        self.setProperty("copied", False)
+        repolish(self)
+
+
+class Card(QFrame):
+    """One command. Click to copy its code, click the star to add it to Favorites.
+
+    Cards with several commands show each on its own row: click a row to copy just
+    that command, or the title / "Copy all" to copy everything.
+    """
+
+    clicked = Signal(object)
+    line_clicked = Signal(object, object)  # card, CodeLine
     star_toggled = Signal(object, bool)
 
     def __init__(self, item: Item, font: QFont, starred: bool = False, show_source: bool = False):
@@ -249,12 +302,33 @@ class Card(QFrame):
             src.setObjectName("source")
             lay.addWidget(src)
 
-        code = QLabel(item.code)
-        code.setObjectName("code")
-        code.setFont(font)
-        code.setTextFormat(Qt.TextFormat.PlainText)
-        code.setWordWrap(True)
-        lay.addWidget(code)
+        self.lines: list[CodeLine] = []
+        commands = split_commands(item.code)
+        if len(commands) > 1:
+            # Several commands: each one is its own clickable row.
+            self.setToolTip("Click a line to copy just that command.\nClick the title to copy everything.")
+            self.copy_all = QToolButton()
+            self.copy_all.setObjectName("copyAll")
+            self.copy_all.setText("Copy all")
+            self.copy_all.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.copy_all.setToolTip("Copy every line of this card")
+            self.copy_all.clicked.connect(lambda: self.clicked.emit(self))
+            head.insertWidget(1, self.copy_all, 0, Qt.AlignmentFlag.AlignTop)
+            box = QVBoxLayout()
+            box.setSpacing(1)
+            for text in commands:
+                line = CodeLine(text, font)
+                line.clicked.connect(lambda l: self.line_clicked.emit(self, l))
+                self.lines.append(line)
+                box.addWidget(line)
+            lay.addLayout(box)
+        else:
+            code = QLabel(item.code)
+            code.setObjectName("code")
+            code.setFont(font)
+            code.setTextFormat(Qt.TextFormat.PlainText)
+            code.setWordWrap(True)
+            lay.addWidget(code)
 
         if item.note:
             note = QLabel(item.note)
@@ -606,6 +680,7 @@ class Dock(QWidget):
     def make_card(self, item: Item, show_source: bool = False) -> Card:
         card = Card(item, self.mono, item.key in self.favorites, show_source)
         card.clicked.connect(self.copy_card)
+        card.line_clicked.connect(self.copy_line)
         card.star_toggled.connect(self.on_star)
         self.cards_by_key.setdefault(item.key, []).append(card)
         return card
@@ -742,13 +817,24 @@ class Dock(QWidget):
                     self.tabs.setCurrentIndex(i)
                     break
 
-    def copy_card(self, card: Card) -> None:
-        QGuiApplication.clipboard().setText(card.item.code)
-        card.flash()
+    def copy_line(self, card: Card, line: "CodeLine") -> None:
+        QGuiApplication.clipboard().setText(line.text())
+        line.flash()
+        self._count_use(card)
+        first = line.text().split("\n", 1)[0]
+        self._set_status(f"Copied: {first if len(first) <= 60 else first[:57] + '…'}")
+        QTimer.singleShot(2500, self._idle_status)
+
+    def _count_use(self, card: Card) -> None:
         key = card.item.key
         self.usage[key] = self.usage.get(key, 0) + 1
         self._fav_dirty = True  # "Most used" is refreshed when the panel closes
         self.save_timer.start()
+
+    def copy_card(self, card: Card) -> None:
+        QGuiApplication.clipboard().setText(card.item.code)
+        card.flash()
+        self._count_use(card)
         self._set_status(f"Copied: {card.item.title}")
         QTimer.singleShot(2500, self._idle_status)
 

@@ -16,7 +16,7 @@ CheatDock stays out of the way as a small `>_` icon on the edge of your monitor.
 - **Works with multiple monitors**: drag the icon, or the panel's title bar, to any side of any screen. It snaps to the nearest edge and remembers where you left it
 - **Opens on hover, click or a global hotkey**, and closes when you move away or press `Esc`
 - **Search across every tab at once.** Each tab shows how many matches it has, and `Enter` copies the first result
-- **Click to copy** any command
+- **Click to copy** any command. When a card shows several commands, click one line to copy just that command, or **Copy all** (or the title) for the whole card
 - **Pin** the panel open while you work through something
 - **Plain YAML files**: add a tab or a command by editing a text file, and the app reloads on its own
 - **Light and dark themes**: the ☀ / ☾ button in the panel switches them, and your choice is remembered
