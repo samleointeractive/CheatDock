@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -15,8 +16,9 @@ from PySide6.QtGui import (
     QAction, QColor, QCursor, QDesktopServices, QFont, QFontDatabase, QGuiApplication,
     QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut,
 )
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
     QScrollArea, QSystemTrayIcon, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -74,7 +76,7 @@ def check_mark(color: str) -> str:
 def build_style(t: dict) -> str:
     return f"""
 #panel {{ background: {t['bg']}; border-left: 1px solid {t['border']}; border-right: 1px solid {t['border']}; }}
-QWidget {{ color: {t['text']}; font-family: "Segoe UI", sans-serif; font-size: 10pt; }}
+QWidget {{ color: {t['text']}; font-family: "Segoe UI", "Ubuntu", "Cantarell", "Noto Sans", sans-serif; font-size: 10pt; }}
 #appTitle {{ font-size: 12pt; font-weight: 600; color: {t['strong']}; }}
 QLineEdit {{
     background: {t['input']}; border: 1px solid {t['input_border']}; border-radius: 6px;
@@ -116,7 +118,7 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 #cardTitle {{ color: {t['strong']}; font-weight: 600; }}
 #code {{
     color: {t['code']}; background: transparent;
-    font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
+    font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Consolas", "DejaVu Sans Mono", "Ubuntu Mono", monospace;
     font-size: 9.5pt;
 }}
 #note {{ color: {t['muted']}; font-size: 9pt; }}
@@ -126,11 +128,17 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 #codeLine {{
     color: {t['code']}; background: transparent; border: 1px solid transparent; border-radius: 4px;
     padding: 1px 4px 1px 3px;
-    font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
+    font-family: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Consolas", "DejaVu Sans Mono", "Ubuntu Mono", monospace;
     font-size: 9.5pt;
 }}
 #codeLine:hover {{ background: {t['line_hover']}; border-color: {t['card_hover_border']}; }}
 #codeLine[copied="true"] {{ background: {t['copied']}; border-color: {t['copied_border']}; }}
+#colHead {{
+    background: transparent; border: none; padding: 0px 0px 2px 0px;
+    color: {t['accent']}; font-size: 8pt; font-weight: 700; letter-spacing: 1px;
+}}
+#colHead:hover {{ background: transparent; text-decoration: underline; }}
+#colHead:disabled {{ color: {t['muted']}; }}
 #copyAll {{
     background: transparent; border: 1px solid {t['border']}; border-radius: 4px;
     padding: 0px 6px; font-size: 8pt; color: {t['muted']};
@@ -271,6 +279,26 @@ class CodeLine(QLabel):
         repolish(self)
 
 
+class ColumnHead(QToolButton):
+    """Column name above side-by-side code (e.g. "PySpark"). Click to copy that column."""
+
+    def __init__(self, label: str, code: str):
+        super().__init__()
+        self.setObjectName("colHead")
+        self.setText(label)
+        self.command = code
+        self.lines: list[CodeLine] = []
+        if code:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setToolTip(f"Copy all {label}")
+        else:
+            self.setEnabled(False)
+
+    def flash(self) -> None:
+        for line in self.lines:
+            line.flash()
+
+
 class Card(QFrame):
     """One command. Click to copy its code, click the star to add it to Favorites.
 
@@ -315,7 +343,35 @@ class Card(QFrame):
 
         self.lines: list[CodeLine] = []
         commands = split_commands(item.code)
-        if len(commands) > 1:
+        if item.columns:
+            # Side by side (e.g. PySpark | SQL). Click a line, or a column name to copy that column.
+            self.setToolTip("Click a line to copy that command.\nClick a column name to copy the whole column.")
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(2)
+            for col, (label, code_text) in enumerate(item.columns.items()):
+                grid.setColumnStretch(col, 1)
+                head_btn = ColumnHead(label, code_text)
+                grid.addWidget(head_btn, 0, col, Qt.AlignmentFlag.AlignLeft)
+                box = QVBoxLayout()
+                box.setSpacing(1)
+                if code_text:
+                    head_btn.clicked.connect(lambda _=False, h=head_btn: self.line_clicked.emit(self, h))
+                    for text in split_commands(code_text):
+                        line = CodeLine(text, font)
+                        line.clicked.connect(lambda l: self.line_clicked.emit(self, l))
+                        self.lines.append(line)
+                        head_btn.lines.append(line)
+                        box.addWidget(line)
+                else:
+                    none = QLabel("—  no direct equivalent")
+                    none.setObjectName("note")
+                    box.addWidget(none)
+                box.addStretch(1)
+                grid.addLayout(box, 1, col)
+            lay.addLayout(grid)
+        elif len(commands) > 1:
             # Several commands: each one is its own clickable row.
             self.setToolTip("Click a line to copy just that command.\nClick the title to copy everything.")
             self.copy_all = QToolButton()
@@ -348,7 +404,7 @@ class Card(QFrame):
             lay.addWidget(note)
 
         self.haystack = " ".join(
-            [item.title, item.code, item.note, item.section, item.sheet_name]
+            [item.title, item.code, item.note, item.section, item.sheet_name, *item.columns.values()]
         ).lower()
 
     def set_starred(self, on: bool) -> None:
@@ -363,7 +419,9 @@ class Card(QFrame):
         self.star_toggled.emit(self, on)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+        # Column cards copy only from a line or a column name, never "the whole card".
+        if (event.button() == Qt.MouseButton.LeftButton and not self.item.columns
+                and self.rect().contains(event.position().toPoint())):
             self.clicked.emit(self)
         super().mouseReleaseEvent(event)
 
@@ -407,6 +465,8 @@ class SheetTab(QScrollArea):
                 lay.addWidget(card)
                 cards.append(card)
             self.groups.append((header, cards))
+        # Tabs with side-by-side columns get a wider panel.
+        self.wide = any(c.item.columns for _, cards in self.groups for c in cards)
 
         self.empty = QLabel()
         self.empty.setObjectName("hint" if hint else "empty")
@@ -662,6 +722,7 @@ class Dock(QWidget):
         self.tabs.tabBar().setExpanding(False)
         self.tabs.tabBar().setUsesScrollButtons(True)
         self.tabs.tabBar().setDrawBase(False)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         lay.addWidget(self.tabs, 1)
 
         self.status = QLabel()
@@ -679,8 +740,10 @@ class Dock(QWidget):
                       activated=lambda i=i: self.tabs.setCurrentIndex(min(i, self.tabs.count() - 1)))
 
     def _idle_status(self) -> None:
-        hk = self.cfg.hotkey.upper() if self.cfg.hotkey else "—"
-        self._set_status(f"Click to copy · {hk} toggles · Ctrl+T theme · Esc hides")
+        if sys.platform == "win32" and self.cfg.hotkey:
+            self._set_status(f"Click to copy · {self.cfg.hotkey.upper()} toggles · Ctrl+T theme · Esc hides")
+        else:
+            self._set_status("Click to copy · Ctrl+F search · Ctrl+T theme · Esc hides")
 
     def _set_status(self, text: str, error: bool = False) -> None:
         self.status.setText(text)
@@ -832,8 +895,11 @@ class Dock(QWidget):
         QGuiApplication.clipboard().setText(line.command)
         line.flash()
         self._count_use(card)
-        first = line.command.split("\n", 1)[0]
-        self._set_status(f"Copied: {first if len(first) <= 60 else first[:57] + '…'}")
+        if isinstance(line, ColumnHead):
+            self._set_status(f"Copied {line.text()}: {card.item.title}")
+        else:
+            first = line.command.split("\n", 1)[0]
+            self._set_status(f"Copied: {first if len(first) <= 60 else first[:57] + '…'}")
         QTimer.singleShot(2500, self._idle_status)
 
     def _count_use(self, card: Card) -> None:
@@ -933,6 +999,24 @@ class Dock(QWidget):
         except OSError:
             pass
 
+    def panel_width(self) -> int:
+        """Normal width, or the wide width while a tab with side-by-side columns is shown."""
+        tab = self.tabs.currentWidget() if hasattr(self, "tabs") else None
+        width = int(self.cfg.width)
+        if getattr(tab, "wide", False):
+            area = self._screen().availableGeometry()
+            width = max(width, min(int(self.cfg.wide_width), area.width() // 2))
+        return width
+
+    def _on_tab_changed(self, _index: int) -> None:
+        # Resize to the new tab's width while the panel is open (not mid-drag or mid-slide).
+        if getattr(self, "mode", None) == "panel" and self.expanded and not self.dragging:
+            target = self._target_rect("panel")
+            if target != self.geometry():
+                self.anim.stop()
+                self.setGeometry(target)
+                self._layout_children()
+
     def _target_rect(self, mode: str) -> QRect:
         """Geometry for 'icon', 'panel' or 'strip' (1px wide, used to slide in/out)."""
         area = self._screen().availableGeometry()
@@ -941,7 +1025,7 @@ class Dock(QWidget):
             w, h = size, size
             y = area.top() + round(self.y_frac * max(0, area.height() - size))
         else:
-            w = int(self.cfg.width) if mode == "panel" else 1
+            w = self.panel_width() if mode == "panel" else 1
             h, y = area.height(), area.top()
         x = area.left() if self.edge == "left" else area.right() + 1 - w
         return QRect(x, y, w, h)
@@ -1003,7 +1087,7 @@ class Dock(QWidget):
             self.icon.show()
         else:
             self.icon.hide()
-            pw = int(self.cfg.width)
+            pw = self.panel_width()
             # Anchor the panel to the moving side so it slides in from the edge.
             x = w - pw if self.edge == "left" else 0
             self.panel.setGeometry(x, 0, pw, h)
@@ -1121,6 +1205,51 @@ def build_tray(app: QApplication, dock: Dock) -> QSystemTrayIcon:
     return tray
 
 
+COMMANDS = {"--toggle": "toggle", "--show": "show", "--hide": "hide"}
+
+
+def _server_name() -> str:
+    user = os.environ.get("USER") or os.environ.get("USERNAME") or "user"
+    return f"cheatdock-{user}"
+
+
+def _send_to_running(command: str) -> bool:
+    """Pass a command to the CheatDock that is already running. True if it was delivered."""
+    sock = QLocalSocket()
+    sock.connectToServer(_server_name())
+    if not sock.waitForConnected(500):
+        return False
+    sock.write(command.encode() + b"\n")
+    sock.waitForBytesWritten(500)
+    sock.disconnectFromServer()
+    return True
+
+
+def _listen_for_commands(app: QApplication, dock: "Dock") -> QLocalServer:
+    """`CheatDock --toggle` from a second process (e.g. a Linux keyboard shortcut) lands here."""
+    server = QLocalServer(app)
+    QLocalServer.removeServer(_server_name())  # left over after a crash
+    server.listen(_server_name())
+
+    def on_connection() -> None:
+        conn = server.nextPendingConnection()
+
+        def read() -> None:
+            for raw in bytes(conn.readAll()).decode(errors="ignore").split():
+                if raw == "toggle":
+                    dock.toggle()
+                elif raw == "show":
+                    dock.expand(focus=True)
+                elif raw == "hide":
+                    dock.collapse(force=True)
+
+        conn.readyRead.connect(read)
+        conn.disconnected.connect(conn.deleteLater)
+
+    server.newConnection.connect(on_connection)
+    return server
+
+
 def main() -> int:
     if sys.platform == "win32":
         # Own taskbar identity, so Windows shows CheatDock's icon instead of Python's.
@@ -1129,25 +1258,40 @@ def main() -> int:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SamleoInteractive.CheatDock")
         except (AttributeError, OSError):
             pass
+    elif sys.platform.startswith("linux") and os.environ.get("WAYLAND_DISPLAY") \
+            and "QT_QPA_PLATFORM" not in os.environ:
+        # Wayland does not let apps place their own windows, so docking to the
+        # screen edge needs X11. XWayland provides it on GNOME, KDE and others.
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+    command = next((COMMANDS[a] for a in sys.argv[1:] if a in COMMANDS), None)
+
     app = QApplication(sys.argv)
     app.setApplicationName("CheatDock")
+    app.setDesktopFileName("cheatdock")
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(app_icon())
 
-    lock = QLockFile(QDir.tempPath() + "/cheatdock.lock")
+    lock = QLockFile(QDir.tempPath() + f"/{_server_name()}.lock")
     if not lock.tryLock(100):
-        QMessageBox.information(None, "CheatDock", "CheatDock is already running (see the system tray).")
+        # Already running: hand the command over (plain launch = show the panel).
+        if not _send_to_running(command or "show"):
+            QMessageBox.information(None, "CheatDock", "CheatDock is already running (see the system tray).")
         return 0
+    if command in ("toggle", "hide"):
+        command = None  # nothing to toggle yet; just start
 
     cfg = load_config()
     dock = Dock(cfg)
     dock.show()
     tray = build_tray(app, dock)  # noqa: F841 - keep a reference
+    server = _listen_for_commands(app, dock)  # noqa: F841 - keep a reference
     if dock.enabled is None:
         QTimer.singleShot(500, lambda: dock.open_setup(first_run=True))
+    elif command == "show":
+        QTimer.singleShot(300, lambda: dock.expand(focus=True))
 
     hotkey = None
-    if cfg.hotkey:
+    if cfg.hotkey and sys.platform == "win32":
         hotkey = GlobalHotkey(cfg.hotkey)
         hotkey.pressed.connect(dock.toggle)
         hotkey.failed.connect(lambda msg: dock._set_status(msg, error=True))

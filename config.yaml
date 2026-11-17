@@ -5,6 +5,7 @@
 theme: dark               # starting theme: dark | light | system (the ☀/☾ button switches it)
 edge: right               # starting side before you drag it: right | left
 width: 440                # width of the open panel, in pixels
+wide_width: 760           # width for tabs with PySpark | SQL columns (Databricks)
 icon_size: 40             # size of the edge icon, in pixels
 icon_position: 0.5        # starting height of the icon: 0 = top, 0.5 = middle, 1 = bottom
 expand_on_hover: true     # open when the mouse rests on the icon

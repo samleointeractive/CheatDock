@@ -1,8 +1,412 @@
 name: Databricks
 order: 18
 category: Data
-description: Notebooks, dbutils, PySpark, Delta Lake, Unity Catalog and the CLI.
+description: PySpark and SQL side by side, plus Delta Lake, Unity Catalog, dbutils and the CLI.
+# Cards with "pyspark:" and/or "sql:" show both versions side by side.
+columns:
+  pyspark: PySpark
+  sql: SQL
 sections:
+  - name: Read & explore
+    items:
+      - title: Read a table
+        pyspark: |-
+          df = spark.table("main.sales.orders")
+        sql: |-
+          SELECT * FROM main.sales.orders;
+      - title: Preview rows
+        pyspark: |-
+          display(df.limit(100))
+        sql: |-
+          SELECT * FROM main.sales.orders LIMIT 100;
+      - title: Count rows
+        pyspark: |-
+          df.count()
+        sql: |-
+          SELECT COUNT(*) FROM main.sales.orders;
+      - title: Columns and types
+        pyspark: |-
+          df.printSchema()
+        sql: |-
+          DESCRIBE TABLE main.sales.orders;
+      - title: Read a CSV file
+        pyspark: |-
+          df = (spark.read.format("csv")
+                .option("header", True)
+                .option("sep", ";")
+                .load("/Volumes/main/default/raw/sales.csv"))
+        sql: |-
+          SELECT * FROM read_files(
+            '/Volumes/main/default/raw/sales.csv',
+            format => 'csv', header => true, sep => ';');
+      - title: Read JSON / Parquet files
+        pyspark: |-
+          df = spark.read.json("/Volumes/main/default/raw/events/")
+          df = spark.read.parquet("/Volumes/main/default/raw/data.parquet")
+        sql: |-
+          SELECT * FROM json.`/Volumes/main/default/raw/events/`;
+          SELECT * FROM parquet.`/Volumes/main/default/raw/data.parquet`;
+      - title: Use a DataFrame in SQL (temp view)
+        pyspark: |-
+          df.createOrReplaceTempView("orders_v")
+        sql: |-
+          CREATE OR REPLACE TEMP VIEW orders_v AS
+          SELECT * FROM main.sales.orders WHERE status = 'paid';
+      - title: Run SQL from Python
+        pyspark: |-
+          df = spark.sql("SELECT * FROM main.sales.orders WHERE year = 2026")
+        note: In a notebook, the last %sql cell's result is available in Python as _sqldf
+
+  - name: Write
+    items:
+      - title: Save as a table (replace)
+        pyspark: |-
+          df.write.mode("overwrite").saveAsTable("main.sales.orders_clean")
+        sql: |-
+          CREATE OR REPLACE TABLE main.sales.orders_clean AS
+          SELECT * FROM main.sales.orders;
+        note: Delta is the default format
+      - title: Append rows
+        pyspark: |-
+          df.write.mode("append").saveAsTable("main.sales.orders_clean")
+        sql: |-
+          INSERT INTO main.sales.orders_clean
+          SELECT * FROM new_orders;
+      - title: Partitioned table
+        pyspark: |-
+          (df.write.mode("overwrite")
+             .partitionBy("year")
+             .saveAsTable("main.sales.orders_by_year"))
+        sql: |-
+          CREATE OR REPLACE TABLE main.sales.orders_by_year
+          PARTITIONED BY (year) AS
+          SELECT * FROM main.sales.orders;
+      - title: Overwrite with a new schema
+        pyspark: |-
+          (df.write.mode("overwrite")
+             .option("overwriteSchema", True)
+             .saveAsTable("main.sales.orders_clean"))
+        sql: |-
+          CREATE OR REPLACE TABLE main.sales.orders_clean AS
+          SELECT *, current_date() AS loaded_at FROM main.sales.orders;
+      - title: Write CSV / Parquet files
+        pyspark: |-
+          df.write.mode("overwrite").option("header", True).csv("/Volumes/main/default/out/orders")
+          df.write.mode("overwrite").parquet("/Volumes/main/default/out/orders_pq")
+        sql: |-
+          INSERT OVERWRITE DIRECTORY '/Volumes/main/default/out/orders'
+          USING csv OPTIONS (header 'true')
+          SELECT * FROM main.sales.orders;
+      - title: Spark <-> pandas
+        pyspark: |-
+          pdf = df.toPandas()
+          df = spark.createDataFrame(pdf)
+        note: toPandas() pulls everything to the driver; filter or limit first
+
+  - name: Transform
+    items:
+      - title: Import functions
+        pyspark: |-
+          from pyspark.sql import functions as F
+          from pyspark.sql.window import Window
+      - title: Select and rename
+        pyspark: |-
+          df.select("id", F.col("total").alias("amount"))
+        sql: |-
+          SELECT id, total AS amount FROM orders;
+      - title: Filter rows
+        pyspark: |-
+          df.filter((F.col("total") > 100) & (F.col("status") == "paid"))
+        sql: |-
+          SELECT * FROM orders WHERE total > 100 AND status = 'paid';
+      - title: New column
+        pyspark: |-
+          df.withColumn("total_brl", F.col("total") * 5.4)
+        sql: |-
+          SELECT *, total * 5.4 AS total_brl FROM orders;
+      - title: If / else (CASE)
+        pyspark: |-
+          df.withColumn("tier", F.when(F.col("total") > 1000, "high").otherwise("low"))
+        sql: |-
+          SELECT *, CASE WHEN total > 1000 THEN 'high' ELSE 'low' END AS tier
+          FROM orders;
+      - title: Sort and top N
+        pyspark: |-
+          df.orderBy(F.col("total").desc()).limit(10)
+        sql: |-
+          SELECT * FROM orders ORDER BY total DESC LIMIT 10;
+      - title: Group and aggregate
+        pyspark: |-
+          df.groupBy("country").agg(
+              F.sum("total").alias("revenue"),
+              F.countDistinct("customer_id").alias("customers"),
+          )
+        sql: |-
+          SELECT country,
+                 SUM(total) AS revenue,
+                 COUNT(DISTINCT customer_id) AS customers
+          FROM orders
+          GROUP BY country;
+      - title: Join
+        pyspark: |-
+          orders.join(customers, on="customer_id", how="left")
+        sql: |-
+          SELECT o.*, c.name
+          FROM orders o
+          LEFT JOIN customers c ON o.customer_id = c.customer_id;
+      - title: Join a small table (broadcast)
+        pyspark: |-
+          orders.join(F.broadcast(countries), "country_code")
+        sql: |-
+          SELECT /*+ BROADCAST(c) */ *
+          FROM orders o JOIN countries c USING (country_code);
+      - title: Latest row per group
+        pyspark: |-
+          w = Window.partitionBy("customer_id").orderBy(F.col("order_date").desc())
+          latest = df.withColumn("rn", F.row_number().over(w)).filter("rn = 1")
+        sql: |-
+          SELECT * FROM orders
+          QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY customer_id ORDER BY order_date DESC) = 1;
+      - title: Running total
+        pyspark: |-
+          w = Window.partitionBy("customer_id").orderBy("order_date")
+          df.withColumn("running", F.sum("total").over(w))
+        sql: |-
+          SELECT *, SUM(total) OVER (
+            PARTITION BY customer_id ORDER BY order_date) AS running
+          FROM orders;
+      - title: Remove duplicates
+        pyspark: |-
+          df.dropDuplicates()
+          df.dropDuplicates(["email"])
+        sql: |-
+          SELECT DISTINCT * FROM customers;
+      - title: Nulls
+        pyspark: |-
+          df.fillna({"total": 0, "country": "N/A"})
+          df.dropna(subset=["email"])
+        sql: |-
+          SELECT COALESCE(total, 0) AS total FROM orders;
+          SELECT * FROM customers WHERE email IS NOT NULL;
+      - title: Dates
+        pyspark: |-
+          df.withColumn("d", F.to_date("order_ts"))
+          df.withColumn("month", F.date_trunc("month", "order_ts"))
+          df.withColumn("days", F.datediff(F.current_date(), "order_date"))
+        sql: |-
+          SELECT to_date(order_ts) AS d,
+                 date_trunc('MONTH', order_ts) AS month,
+                 datediff(current_date(), order_date) AS days
+          FROM orders;
+      - title: Explode arrays / parse JSON
+        pyspark: |-
+          df.withColumn("item", F.explode("items"))
+          df.withColumn("data", F.from_json("payload", "id INT, name STRING"))
+        sql: |-
+          SELECT explode(items) AS item FROM orders;
+          SELECT from_json(payload, 'id INT, name STRING') AS data FROM events;
+      - title: Stack two tables (union)
+        pyspark: |-
+          df_2025.unionByName(df_2026)
+        sql: |-
+          SELECT * FROM orders_2025
+          UNION ALL
+          SELECT * FROM orders_2026;
+      - title: Pivot
+        pyspark: |-
+          df.groupBy("country").pivot("year").sum("total")
+        sql: |-
+          SELECT * FROM (SELECT country, year, total FROM orders)
+          PIVOT (SUM(total) FOR year IN (2025, 2026));
+
+  - name: Delta Lake
+    items:
+      - title: Get a Delta table object
+        pyspark: |-
+          from delta.tables import DeltaTable
+          dt = DeltaTable.forName(spark, "main.sales.orders")
+        note: Used by the PySpark side of the cards below
+      - title: Create a table
+        pyspark: |-
+          (DeltaTable.createIfNotExists(spark)
+             .tableName("main.sales.orders")
+             .addColumn("id", "BIGINT")
+             .addColumn("total", "DECIMAL(12,2)")
+             .addColumn("order_date", "DATE")
+             .execute())
+        sql: |-
+          CREATE TABLE IF NOT EXISTS main.sales.orders (
+            id BIGINT,
+            total DECIMAL(12, 2),
+            order_date DATE
+          );
+      - title: Upsert (MERGE)
+        pyspark: |-
+          (dt.alias("t")
+             .merge(updates.alias("s"), "t.id = s.id")
+             .whenMatchedUpdateAll()
+             .whenNotMatchedInsertAll()
+             .execute())
+        sql: |-
+          MERGE INTO main.sales.orders AS t
+          USING updates AS s
+          ON t.id = s.id
+          WHEN MATCHED THEN UPDATE SET *
+          WHEN NOT MATCHED THEN INSERT *;
+      - title: Update / delete rows
+        pyspark: |-
+          dt.update("status = 'pending'", {"status": "'cancelled'"})
+          dt.delete("total < 0")
+        sql: |-
+          UPDATE main.sales.orders SET status = 'cancelled' WHERE status = 'pending';
+          DELETE FROM main.sales.orders WHERE total < 0;
+      - title: History
+        pyspark: |-
+          display(dt.history())
+        sql: |-
+          DESCRIBE HISTORY main.sales.orders;
+      - title: Time travel
+        pyspark: |-
+          spark.read.option("versionAsOf", 12).table("main.sales.orders")
+          spark.read.option("timestampAsOf", "2026-11-01").table("main.sales.orders")
+        sql: |-
+          SELECT * FROM main.sales.orders VERSION AS OF 12;
+          SELECT * FROM main.sales.orders TIMESTAMP AS OF '2026-11-01';
+      - title: Undo a bad write (restore)
+        pyspark: |-
+          dt.restoreToVersion(12)
+        sql: |-
+          RESTORE TABLE main.sales.orders TO VERSION AS OF 12;
+      - title: Optimize / clean up files
+        pyspark: |-
+          dt.optimize().executeZOrderBy("customer_id")
+          dt.vacuum(168)
+        sql: |-
+          OPTIMIZE main.sales.orders ZORDER BY (customer_id);
+          VACUUM main.sales.orders RETAIN 168 HOURS;
+        note: VACUUM deletes old files, so time travel before that point stops working
+      - title: Table details
+        pyspark: |-
+          display(dt.detail())
+        sql: |-
+          DESCRIBE DETAIL main.sales.orders;
+          SHOW CREATE TABLE main.sales.orders;
+      - title: Add a column / comment
+        sql: |-
+          ALTER TABLE main.sales.orders ADD COLUMNS (channel STRING);
+          ALTER TABLE main.sales.orders ALTER COLUMN total COMMENT 'Gross value in BRL';
+
+  - name: Load files incrementally
+    items:
+      - title: Only new files, then stop
+        pyspark: |-
+          (spark.readStream.format("cloudFiles")
+             .option("cloudFiles.format", "json")
+             .option("cloudFiles.schemaLocation", "/Volumes/main/default/chk/events_schema")
+             .load("/Volumes/main/default/raw/events/")
+             .writeStream
+             .option("checkpointLocation", "/Volumes/main/default/chk/events")
+             .trigger(availableNow=True)
+             .toTable("main.bronze.events"))
+        sql: |-
+          COPY INTO main.bronze.events
+          FROM '/Volumes/main/default/raw/events/'
+          FILEFORMAT = JSON
+          COPY_OPTIONS ('mergeSchema' = 'true');
+        note: Auto Loader (left) and COPY INTO (right) both skip files already loaded
+      - title: Streaming table
+        pyspark: |-
+          spark.readStream.table("main.bronze.events")
+        sql: |-
+          CREATE OR REFRESH STREAMING TABLE main.bronze.events AS
+          SELECT * FROM STREAM read_files('/Volumes/main/default/raw/events/', format => 'json');
+
+  - name: Unity Catalog
+    items:
+      - title: Browse catalogs, schemas, tables
+        pyspark: |-
+          spark.catalog.listCatalogs()
+          spark.catalog.listDatabases()
+          spark.catalog.listTables("main.sales")
+        sql: |-
+          SHOW CATALOGS;
+          SHOW SCHEMAS IN main;
+          SHOW TABLES IN main.sales;
+      - title: Set the default catalog / schema
+        pyspark: |-
+          spark.catalog.setCurrentCatalog("main")
+          spark.catalog.setCurrentDatabase("sales")
+        sql: |-
+          USE CATALOG main;
+          USE SCHEMA sales;
+        note: Full names are catalog.schema.table
+      - title: Does the table exist?
+        pyspark: |-
+          spark.catalog.tableExists("main.sales.orders")
+        sql: |-
+          SHOW TABLES IN main.sales LIKE 'orders';
+      - title: Where am I
+        pyspark: |-
+          spark.catalog.currentCatalog()
+          spark.catalog.currentDatabase()
+        sql: |-
+          SELECT current_user(), current_catalog(), current_schema();
+      - title: Create schema and volume
+        sql: |-
+          CREATE SCHEMA IF NOT EXISTS main.sales;
+          CREATE VOLUME IF NOT EXISTS main.default.raw;
+        note: Files in a volume live at /Volumes/<catalog>/<schema>/<volume>/
+      - title: Grant / revoke access
+        sql: |-
+          GRANT SELECT ON TABLE main.sales.orders TO `analysts`;
+          GRANT USE CATALOG ON CATALOG main TO `analysts`;
+          REVOKE SELECT ON TABLE main.sales.orders FROM `analysts`;
+          SHOW GRANTS ON TABLE main.sales.orders;
+
+  - name: Parameters & secrets
+    items:
+      - title: Notebook parameters (widgets)
+        pyspark: |-
+          dbutils.widgets.text("start_date", "2026-01-01")
+          start = dbutils.widgets.get("start_date")
+        sql: |-
+          SELECT * FROM main.sales.orders WHERE order_date >= :start_date;
+        note: In SQL cells, :name creates the parameter box automatically
+      - title: Read a secret
+        pyspark: |-
+          token = dbutils.secrets.get(scope="my-scope", key="api-token")
+        sql: |-
+          SELECT secret('my-scope', 'api-token');
+        note: Values are shown as [REDACTED] in output
+
+  - name: Performance
+    items:
+      - title: Cache data you reuse
+        pyspark: |-
+          df.cache()
+          df.count()
+          df.unpersist()
+        sql: |-
+          CACHE TABLE main.sales.orders;
+          UNCACHE TABLE main.sales.orders;
+        note: Not available on serverless compute
+      - title: Shuffle partitions
+        pyspark: |-
+          spark.conf.set("spark.sql.shuffle.partitions", "auto")
+        sql: |-
+          SET spark.sql.shuffle.partitions = auto;
+      - title: Query plan
+        pyspark: |-
+          df.explain()
+        sql: |-
+          EXPLAIN SELECT * FROM main.sales.orders WHERE total > 100;
+      - title: Partitions
+        pyspark: |-
+          df.rdd.getNumPartitions()
+          df.repartition(200, "customer_id")
+          df.coalesce(1)
+
   - name: Notebook magic commands
     items:
       - title: Switch language in a cell
@@ -25,14 +429,6 @@ sections:
         code: |-
           %sh ls -la /tmp
           %fs ls /Volumes/main/default/raw
-      - title: Show a DataFrame as a table / chart
-        code: |-
-          display(df)
-          display(spark.sql("SELECT * FROM main.sales.orders LIMIT 100"))
-      - title: SQL result as a Python DataFrame
-        code: |-
-          df = _sqldf
-        note: The last %sql cell's result is available as _sqldf
 
   - name: dbutils
     items:
@@ -46,21 +442,14 @@ sections:
         code: |-
           dbutils.fs.mkdirs("/Volumes/main/default/raw/2026")
           dbutils.fs.head("/Volumes/main/default/raw/a.csv", 500)
-      - title: Widgets (notebook parameters)
+      - title: More widgets
         code: |-
-          dbutils.widgets.text("start_date", "2026-01-01", "Start date")
           dbutils.widgets.dropdown("env", "dev", ["dev", "prod"])
-          start = dbutils.widgets.get("start_date")
           dbutils.widgets.removeAll()
-      - title: Use a widget in SQL
-        code: |-
-          SELECT * FROM main.sales.orders WHERE order_date >= :start_date;
-      - title: Secrets
+      - title: List secrets
         code: |-
           dbutils.secrets.listScopes()
           dbutils.secrets.list("my-scope")
-          token = dbutils.secrets.get(scope="my-scope", key="api-token")
-        note: Values are shown as [REDACTED] in notebook output
       - title: Run a notebook with parameters / return a value
         code: |-
           result = dbutils.notebook.run("./child", 600, {"env": "prod"})
@@ -74,212 +463,6 @@ sections:
         code: |-
           dbutils.help()
           dbutils.fs.help()
-
-  - name: Read & write (PySpark)
-    items:
-      - title: Read a table
-        code: |-
-          df = spark.table("main.sales.orders")
-          df = spark.sql("SELECT * FROM main.sales.orders WHERE year = 2026")
-      - title: Read CSV with header
-        code: |-
-          df = (spark.read.format("csv")
-                .option("header", True)
-                .option("inferSchema", True)
-                .option("sep", ";")
-                .load("/Volumes/main/default/raw/sales.csv"))
-      - title: Read JSON / Parquet
-        code: |-
-          df = spark.read.json("/Volumes/main/default/raw/events/")
-          df = spark.read.parquet("/Volumes/main/default/raw/data.parquet")
-      - title: Save as a table
-        code: |-
-          df.write.mode("overwrite").saveAsTable("main.sales.orders_clean")
-          df.write.mode("append").saveAsTable("main.sales.orders_clean")
-        note: Delta is the default format
-      - title: Overwrite with a new schema / partitioned
-        code: |-
-          (df.write.mode("overwrite")
-             .option("overwriteSchema", True)
-             .partitionBy("year")
-             .saveAsTable("main.sales.orders_clean"))
-      - title: Write files
-        code: |-
-          df.write.mode("overwrite").option("header", True).csv("/Volumes/main/default/out/orders")
-          df.coalesce(1).write.mode("overwrite").parquet("/Volumes/main/default/out/orders_pq")
-      - title: Spark <-> pandas
-        code: |-
-          pdf = df.toPandas()
-          df = spark.createDataFrame(pdf)
-        note: toPandas() pulls everything to the driver; filter or limit first
-
-  - name: Transform (PySpark)
-    items:
-      - title: Import functions
-        code: |-
-          from pyspark.sql import functions as F
-          from pyspark.sql.window import Window
-      - title: Select, rename, filter
-        code: |-
-          df.select("id", "name", F.col("total").alias("amount"))
-          df.withColumnRenamed("old", "new")
-          df.filter((F.col("total") > 100) & (F.col("status") == "paid"))
-      - title: New / changed column
-        code: |-
-          df = df.withColumn("total_brl", F.col("total") * 5.4)
-          df = df.withColumn("tier", F.when(F.col("total") > 1000, "high").otherwise("low"))
-      - title: Group and aggregate
-        code: |-
-          df.groupBy("country").agg(
-              F.sum("total").alias("revenue"),
-              F.countDistinct("customer_id").alias("customers"),
-          )
-      - title: Join
-        code: |-
-          orders.join(customers, on="customer_id", how="left")
-          orders.join(F.broadcast(countries), "country_code")
-        note: broadcast() a small table to avoid a shuffle
-      - title: Window (row number per group)
-        code: |-
-          w = Window.partitionBy("customer_id").orderBy(F.col("order_date").desc())
-          latest = df.withColumn("rn", F.row_number().over(w)).filter("rn = 1")
-      - title: Nulls and duplicates
-        code: |-
-          df.fillna({"total": 0, "country": "N/A"})
-          df.dropna(subset=["email"])
-          df.dropDuplicates(["email"])
-      - title: Dates
-        code: |-
-          df.withColumn("d", F.to_date("order_ts"))
-          df.withColumn("month", F.date_trunc("month", "order_ts"))
-          df.withColumn("days", F.datediff(F.current_date(), "order_date"))
-      - title: Explode arrays / parse JSON
-        code: |-
-          df.withColumn("item", F.explode("items"))
-          df.withColumn("data", F.from_json("payload", "id INT, name STRING"))
-      - title: Inspect
-        code: |-
-          df.printSchema()
-          df.count()
-          df.limit(10).show(truncate=False)
-          df.explain()
-
-  - name: Delta Lake (SQL)
-    items:
-      - title: Create table
-        code: |-
-          CREATE TABLE IF NOT EXISTS main.sales.orders (
-            id BIGINT,
-            customer_id BIGINT,
-            total DECIMAL(12, 2),
-            order_date DATE
-          );
-      - title: Create table from a query
-        code: |-
-          CREATE OR REPLACE TABLE main.sales.paid AS
-          SELECT * FROM main.sales.orders WHERE status = 'paid';
-      - title: Upsert with MERGE
-        code: |-
-          MERGE INTO main.sales.orders AS t
-          USING updates AS s
-          ON t.id = s.id
-          WHEN MATCHED THEN UPDATE SET *
-          WHEN NOT MATCHED THEN INSERT *;
-      - title: History and time travel
-        code: |-
-          DESCRIBE HISTORY main.sales.orders;
-          SELECT * FROM main.sales.orders VERSION AS OF 12;
-          SELECT * FROM main.sales.orders TIMESTAMP AS OF '2026-11-01';
-      - title: Undo a bad write
-        code: |-
-          RESTORE TABLE main.sales.orders TO VERSION AS OF 12;
-      - title: Optimize / clean up files
-        code: |-
-          OPTIMIZE main.sales.orders ZORDER BY (customer_id);
-          VACUUM main.sales.orders RETAIN 168 HOURS;
-        note: VACUUM removes old files, so time travel before that point stops working
-      - title: Table details
-        code: |-
-          DESCRIBE DETAIL main.sales.orders;
-          DESCRIBE TABLE EXTENDED main.sales.orders;
-          SHOW CREATE TABLE main.sales.orders;
-      - title: Change columns
-        code: |-
-          ALTER TABLE main.sales.orders ADD COLUMNS (channel STRING);
-          ALTER TABLE main.sales.orders ALTER COLUMN total COMMENT 'Gross value in BRL';
-      - title: Read a CSV file with SQL
-        code: |-
-          SELECT * FROM read_files('/Volumes/main/default/raw/sales.csv', format => 'csv', header => true);
-      - title: Load files incrementally
-        code: |-
-          COPY INTO main.sales.orders
-          FROM '/Volumes/main/default/raw/orders/'
-          FILEFORMAT = CSV
-          FORMAT_OPTIONS ('header' = 'true')
-          COPY_OPTIONS ('mergeSchema' = 'true');
-        note: Files already loaded are skipped on the next run
-
-  - name: Unity Catalog
-    items:
-      - title: Browse catalogs, schemas, tables
-        code: |-
-          SHOW CATALOGS;
-          SHOW SCHEMAS IN main;
-          SHOW TABLES IN main.sales;
-      - title: Set the default catalog / schema
-        code: |-
-          USE CATALOG main;
-          USE SCHEMA sales;
-        note: Names are catalog.schema.table
-      - title: Create schema and volume
-        code: |-
-          CREATE SCHEMA IF NOT EXISTS main.sales;
-          CREATE VOLUME IF NOT EXISTS main.default.raw;
-        note: Files in a volume live at /Volumes/<catalog>/<schema>/<volume>/
-      - title: Grant / revoke access
-        code: |-
-          GRANT SELECT ON TABLE main.sales.orders TO `analysts`;
-          GRANT USE CATALOG ON CATALOG main TO `analysts`;
-          REVOKE SELECT ON TABLE main.sales.orders FROM `analysts`;
-          SHOW GRANTS ON TABLE main.sales.orders;
-      - title: Who am I / where am I
-        code: |-
-          SELECT current_user(), current_catalog(), current_schema();
-
-  - name: Streaming & Auto Loader
-    items:
-      - title: Auto Loader into a table
-        code: |-
-          (spark.readStream.format("cloudFiles")
-             .option("cloudFiles.format", "json")
-             .option("cloudFiles.schemaLocation", "/Volumes/main/default/chk/events_schema")
-             .load("/Volumes/main/default/raw/events/")
-             .writeStream
-             .option("checkpointLocation", "/Volumes/main/default/chk/events")
-             .trigger(availableNow=True)
-             .toTable("main.bronze.events"))
-        note: availableNow processes new files and stops, good for scheduled jobs
-      - title: Read a table as a stream
-        code: |-
-          spark.readStream.table("main.bronze.events")
-
-  - name: Performance
-    items:
-      - title: Cache a DataFrame you reuse
-        code: |-
-          df.cache()
-          df.count()
-          df.unpersist()
-        note: count() makes the cache fill now
-      - title: Partitions
-        code: |-
-          df.rdd.getNumPartitions()
-          df.repartition(200, "customer_id")
-          df.coalesce(1)
-      - title: Spark settings
-        code: |-
-          spark.conf.set("spark.sql.shuffle.partitions", "auto")
-          spark.conf.get("spark.sql.shuffle.partitions")
 
   - name: Databricks CLI
     items:

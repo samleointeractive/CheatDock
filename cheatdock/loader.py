@@ -25,6 +25,7 @@ class Config:
     theme: str = "dark"            # starting theme: "dark", "light" or "system"
     edge: str = "right"            # starting side: "right" or "left"
     width: int = 440               # expanded width in px
+    wide_width: int = 760          # width for tabs with side-by-side columns (e.g. Databricks)
     icon_size: int = 40            # size of the edge icon in px
     icon_position: float = 0.5     # starting height: 0 = top, 1 = bottom
     expand_on_hover: bool = True
@@ -54,6 +55,7 @@ class Item:
     key: str = ""        # "<sheet id>::<title>", used for favorites and usage counts
     sheet_name: str = ""
     section: str = ""
+    columns: dict[str, str] = field(default_factory=dict)  # label -> code, shown side by side
 
 
 @dataclass
@@ -103,18 +105,28 @@ def load_sheets(folder: Path | None = None) -> tuple[list[Sheet], list[str]]:
                 description=str(data.get("description", "") or "").strip(),
                 default=bool(data.get("default", False)),
             )
+            # Optional side-by-side columns, e.g. {pyspark: PySpark, sql: SQL}:
+            # items can then give "pyspark:" and "sql:" instead of "code:".
+            col_defs = {str(k): str(v) for k, v in (data.get("columns") or {}).items()}
             for sec in data.get("sections", []) or []:
                 section = Section(name=str(sec.get("name", "")))
                 for it in sec.get("items", []) or []:
                     title = str(it.get("title", "")).strip()
+                    columns: dict[str, str] = {}
+                    if col_defs and any(k in it for k in col_defs):
+                        columns = {label: str(it.get(k, "") or "").rstrip("\n") for k, label in col_defs.items()}
+                    code = str(it.get("code", "")).rstrip("\n")
+                    if columns and not code:
+                        code = next((c for c in columns.values() if c), "")
                     section.items.append(
                         Item(
                             title=title,
-                            code=str(it.get("code", "")).rstrip("\n"),
+                            code=code,
                             note=str(it.get("note", "") or "").strip(),
                             key=f"{sheet.id}::{title}",
                             sheet_name=sheet.name,
                             section=section.name,
+                            columns=columns,
                         )
                     )
                 sheet.sections.append(section)
